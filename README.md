@@ -1,4 +1,4 @@
-# Async FastAPI Bolierplate
+# Async FastAPI Boilerplate
 
 Async FastAPI + Asyncio SQLAlchemy + postgres + Alembic migrations + Celery + Flower (with grafana) + Traefik
 
