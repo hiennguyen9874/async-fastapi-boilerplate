@@ -1,0 +1,180 @@
+version: "3.3"
+
+services:
+  proxy:
+    image: traefik:v2.5
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    networks:
+      - traefik-public
+    command:
+      #- "--log.level=DEBUG"
+      # Traefik will listen on port 8080 by default for API request.
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      # - "--providers.docker.constraints=Label(`traefik.constraint-label-stack`)"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.http.address=:80"
+    labels:
+      - "traefik.enable=true"
+      # Defines a default docker network to use for connections to all containers.
+      - "traefik.docker.network=${COMPOSE_PROJECT_NAME}_traefik-public"
+      - "traefik.constraint-label=traefik-public"
+      - "traefik.http.routers.proxy.rule=Host(`fastapi.localhost`)"
+      - "traefik.http.routers.proxy.entrypoints=http"
+      - "traefik.http.services.proxy.loadbalancer.server.port=80"
+
+  db:
+    image: postgres:14.0-alpine
+    volumes:
+      - app-db-data:/var/lib/postgresql/data/
+    networks:
+      - back
+    env_file:
+      - .env
+    environment:
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    expose:
+      - 5432
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: fastapi.dockerfile
+    command: /start-reload.sh
+    networks:
+      - back
+      - traefik-public
+    env_file:
+      - .env
+    volumes:
+      - ./backend/app:/app
+    expose:
+      - 80
+    ports:
+      - "15080:80"
+    depends_on:
+      - db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${COMPOSE_PROJECT_NAME}_traefik-public"
+      - "traefik.constraint-label=traefik-public"
+      - "traefik.http.routers.backend.rule=Host(`fastapi.localhost`) && (PathPrefix(`/api`) || PathPrefix(`/docs`) || PathPrefix(`/redoc`))"
+      - "traefik.http.services.backend.loadbalancer.server.port=80"
+
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.9.8-management-alpine
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=mypass
+    networks:
+      - back
+    expose:
+      - 5672
+      - 15672
+    restart: unless-stopped
+
+  redis:
+    image: redis:6.2.6-alpine
+    networks:
+      - back
+    expose:
+      - 6379
+    restart: unless-stopped
+
+  celery:
+    build:
+      context: ./backend
+      dockerfile: celery.dockerfile
+    depends_on:
+      - db
+      - rabbitmq
+      - redis
+    networks:
+      - back
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  flower:
+    image: mher/flower
+    command: celery flower --broker_api=http://admin:mypass@rabbitmq:15672/api/
+    environment:
+      - CELERY_BROKER_URL=amqp://admin:mypass@rabbitmq:5672/
+      - CELERY_RESULT_BACKEND=redis://redis:6379/
+      # - FLOWER_BASIC_AUTH=admin:admin_flower # auth will not working with prometheus
+      - FLOWER_PORT=5555
+    networks:
+      - back
+      - visualize
+      - traefik-public
+    expose:
+      - 5555
+    depends_on:
+      - rabbitmq
+      - celery
+      - redis
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${COMPOSE_PROJECT_NAME}_traefik-public
+      - "traefik.constraint-label=traefik-public"
+      # - traefik.http.routers.flower.rule=Host(`fastapi.localhost`) && PathPrefix(`/flower`)
+      - traefik.http.routers.flower.rule=Host(`flower.localhost`)
+      - traefik.http.routers.flower.entrypoints=http
+      - traefik.http.services.flower.loadbalancer.server.port=5555
+    restart: unless-stopped
+
+  # https://flower.readthedocs.io/en/latest/prometheus-integration.html#celery-flower-prometheus-grafana-integration-guide
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    expose:
+      - 9090
+    networks:
+      - visualize
+    depends_on:
+      - flower
+
+  grafana:
+    image: grafana/grafana
+    environment:
+      # - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/grafana
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/
+      - GF_SERVER_DOMAIN=fastapi.localhost
+    #   - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    depends_on:
+      - prometheus
+    expose:
+      - 3000
+    networks:
+      - visualize
+      - traefik-public
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=${COMPOSE_PROJECT_NAME}_traefik-public
+      - "traefik.constraint-label=traefik-public"
+      # - traefik.http.routers.grafana.rule=Host(`fastapi.localhost`) && PathPrefix(`/grafana`)
+      - traefik.http.routers.grafana.rule=Host(`grafana.localhost`)
+      - traefik.http.routers.grafana.entrypoints=http
+      - traefik.http.services.grafana.loadbalancer.server.port=3000
+
+networks:
+  back:
+  visualize:
+  traefik-public:
+
+volumes:
+  app-db-data:
+  app-pgadmin-data:
+  grafana-storage:
+# traefik.docker.network in docker network ls
+# https://stackoverflow.com/questions/46161017/gateway-timeout-with-traefik-and-php-fpm
