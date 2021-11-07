@@ -16,6 +16,8 @@ class Settings(BaseSettings):
 
     SECRET_KEY: str
 
+    SERVER_HOST: str
+
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
 
     PROJECT_NAME: str
@@ -68,6 +70,35 @@ class Settings(BaseSettings):
         if len(v) == 0:
             return None
         return v
+
+    # Emails
+    SMTP_TLS: bool = True
+    SMTP_PORT: Optional[int] = None
+    SMTP_HOST: Optional[str] = None
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+
+    EMAIL_TEMPLATES_DIR: str = "/app/app/email-templates/build"
+    EMAIL_RESET_TOKEN_EXPIRE_HOURS: int = 48
+    EMAILS_FROM_EMAIL: Optional[EmailStr] = None
+
+    EMAILS_FROM_NAME: Optional[str] = None
+
+    @validator("EMAILS_FROM_NAME")
+    def get_project_name(cls, v: Optional[str], values: Dict[str, Any]) -> str:
+        if not v:
+            return values["PROJECT_NAME"]
+        return v
+
+    EMAILS_ENABLED: bool = False
+
+    @validator("EMAILS_ENABLED", pre=True)
+    def get_emails_enabled(cls, v: bool, values: Dict[str, Any]) -> bool:
+        return bool(
+            values.get("SMTP_HOST")
+            and values.get("SMTP_PORT")
+            and values.get("EMAILS_FROM_EMAIL")
+        )
 
     class Config:
         case_sensitive = True

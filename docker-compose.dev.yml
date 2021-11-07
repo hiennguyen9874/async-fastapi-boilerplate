@@ -55,8 +55,6 @@ services:
       - ./backend/app:/app
     expose:
       - 80
-    ports:
-      - "15080:80"
     depends_on:
       - db
     labels:
