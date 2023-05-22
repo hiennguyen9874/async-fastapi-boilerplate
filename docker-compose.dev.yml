@@ -170,9 +170,10 @@ networks:
   visualize:
   traefik-public:
 
+
 volumes:
   app-db-data:
   app-pgadmin-data:
   grafana-storage:
-# traefik.docker.network in docker network ls
-# https://stackoverflow.com/questions/46161017/gateway-timeout-with-traefik-and-php-fpm
+    # traefik.docker.network in docker network ls
+    # https://stackoverflow.com/questions/46161017/gateway-timeout-with-traefik-and-php-fpm
